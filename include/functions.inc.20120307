@@ -1,0 +1,869 @@
+<?php
+require_once "include/pders_db.inc";
+require_once "include/logger.inc";
+require_once "include/reconcileNumbers.inc";
+
+//function getAcctNameFromAcctNums($acctNums) {
+	
+
+
+function generateGraph($graphAcctArray) {
+        date_default_timezone_set('America/Denver');
+
+        // Logging class initialization 
+        $log = new Logging();
+        // set path and name of log file (optional) 
+        $log->lfile('/home/rickchurch11/logs/rdc.log');
+
+        $log->lwrite(__FILE__, sprintf("Entering generateGraph()"));
+
+	$beginMonth = $_SESSION['beginMonth'];
+	$endMonth = $_SESSION['endMonth'];
+	$log->lwrite(__FILE__, sprintf("beginMonth: %s     endMonth: %s", $beginMonth, $endMonth));
+
+
+
+	$acctNumArray = getAcctNumberArray("Preston");
+	foreach ($acctNumArray as $item) {
+		if (in_array($item['LI_AcctNumber'],$graphAcctArray)) {
+			$log->lwrite(__FILE__,sprintf("Need AcctNum: %s    AcctName: %s", $item['LI_AcctNumber'], $item['LI_FullName']));
+			$acctNameLookup[$item['LI_AcctNumber']] = $item['LI_FullName'];
+		}
+	}
+
+	//"SELECT LI_AcctNumber, LI_FullName, LI_Category, LI_Type FROM LINE_ITEMS 
+        //      WHERE LI_MgmntCompany = ? AND LI_DisplayPosition < 450 ORDER BY LI_DisplayPosition"
+
+
+
+
+	include "/home/rickchurch11/www/libchart/libchart/classes/libchart.php";
+	//$chart = new LineChart(500, 250);
+	$chart = new LineChart(1300, 450);
+
+	$aveReportSize = array();
+	$masterDataAndAveData = getFinancialsMultMonths($beginMonth, $endMonth, $aveReportSize);
+	//$masterMonthData['201103']['5015']['Amount_mo_disp']  would give 
+        //               the month amount for acct 5015(asset Mgr) for Mar 2011
+
+	$MasterMonthData = $masterDataAndAveData[0];
+	//$displayAcctNumArray = getAcctNumberArray("Preston");
+	$monthArray = convertDateRangeToArray($beginMonth, $endMonth);
+	
+	$seriesArray = array();
+	foreach ($graphAcctArray as $acctNum ) {
+		// instantiate a new dataSet for each acct (each line graph)
+		$seriesArray[$acctNum] = new XYDataSet();
+	}
+
+	foreach ($monthArray as $month) {
+	        $log->lwrite(__FILE__,sprintf("Setting data points for: %s", $month['dateValue']));
+		foreach ($graphAcctArray as $acctNum ) {
+			//$serie1->addPoint(new Point("06-01", 273));
+			$value = $MasterMonthData[$month['dateValue']][$acctNum]['Amount_mo_real'];
+
+			// if there is no value in db for this, then convert the resulting empty str to zero
+			if ($value == "") {
+				$value = 0;
+				//$log->lwrite(__FILE__, "Found empty string for graph data value, so convert to zero.");
+			}
+
+			$dateToDisplay = $month['dateDisplay'];
+			$log->lwrite(__FILE__,sprintf("Date: %s    Value: [%s]", $dateToDisplay, $value));
+
+			//  create new data point for this acct using date and value
+			$seriesArray[$acctNum]->addPoint(new Point($dateToDisplay, $value));
+		}
+	}
+
+	$dataSet = new XYSeriesDataSet();
+	foreach ($graphAcctArray as $acctNum ) {
+		$dataSet->addSerie($acctNum, $seriesArray[$acctNum]);
+	}
+
+	/*
+	$chart = new LineChart(500, 250);
+
+	$serie1 = new XYDataSet();
+	$serie1->addPoint(new Point("06-01", 273));
+	$serie1->addPoint(new Point("06-02", 421));
+	$serie1->addPoint(new Point("06-03", 642));
+	$serie1->addPoint(new Point("06-04", 799));
+	$serie1->addPoint(new Point("06-05", 1009));
+	$serie1->addPoint(new Point("06-06", 1106));
+	
+	$serie2 = new XYDataSet();
+	$serie2->addPoint(new Point("06-01", 280));
+	$serie2->addPoint(new Point("06-02", 300));
+	$serie2->addPoint(new Point("06-03", 212));
+	$serie2->addPoint(new Point("06-04", 542));
+	$serie2->addPoint(new Point("06-05", 600));
+	$serie2->addPoint(new Point("06-06", 850));
+
+	$dataSet = new XYSeriesDataSet();
+	$dataSet->addSerie("Product 1", $serie1);
+	$dataSet->addSerie("Product 2", $serie2);
+	*/
+
+	$chart->setDataSet($dataSet);
+
+	$beginMonthDisplay = $monthArray[0]['dateDisplay'];
+	$endMonthDisplay = $monthArray[count($monthArray)-1]['dateDisplay'];
+
+	$chartTitle = sprintf("Financial trends for months %s thru %s", $beginMonthDisplay, $endMonthDisplay);
+	$chart->setTitle($chartTitle);
+	$rndm = rand();
+	$file = sprintf("libchart/demo/generated/rcGraph%d.png", $rndm);
+	$chart->render($file);
+
+	return $file;
+}
+
+
+function getAcctNumberArray($mgmntCo) {
+        $monthArray = array();
+	//  LI_DisplayPosition < 450 will include all line items
+	$query = "SELECT LI_AcctNumber, LI_FullName, LI_Category, LI_Type FROM LINE_ITEMS 
+	      WHERE LI_MgmntCompany = ? AND LI_DisplayPosition < 450 ORDER BY LI_DisplayPosition";
+        $params = array($mgmntCo);
+        $dbh = new pders_pdo();
+        $result = $dbh->Query($query, $params);
+        return $result;
+}
+
+
+function convertDateRangeToArray($beginMonth, $endMonth) {
+	//  keys available;
+	//     $monthArray['dateValue']
+	//     $monthArray['DateDisplay']
+
+        date_default_timezone_set('America/Denver');
+
+        // Logging class initialization 
+        $log = new Logging();
+        // set path and name of log file (optional) 
+        $log->lfile('/home/rickchurch11/logs/rdc.log');
+
+        $log->lwrite(__FILE__, sprintf("Entering convertDateRangeToArray(%s, %s)", $beginMonth,$endMonth));
+
+        //$monthArray = array();
+        $query = "SELECT DISTINCT EN_Date FROM (SELECT * FROM ENTRIES P1 
+	     WHERE P1.EN_Date >= ? AND P1.EN_Date <= ?) AS Q1 ORDER BY EN_Date";
+        $params = array($beginMonth, $endMonth);
+        $dbh = new pders_pdo();
+        $result = $dbh->Query($query, $params);
+
+	$reportDates = getList_reportDates();
+	$monthArray = array();
+	foreach ($result as $month) {
+		$curMonth = $month['EN_Date'];
+		$log->lwrite(__FILE__, sprintf("cur month value: %s", $curMonth));
+
+		foreach ($reportDates as $dates) {
+			if ($dates['DateValue'] == $curMonth) {
+				//$log->lwrite(__FILE__, sprintf("We have a match for %s", $curMonth));
+				//$log->lwrite(__FILE__, sprintf("Saving display value of %s for  %s", $dates['DateDisplay'],$curMonth));
+				$monthArray[]= array('dateValue'=>$curMonth, 'dateDisplay'=>$dates['DateDisplay']);
+			}
+		}
+	}
+	foreach ($monthArray as $tMonth ) {
+		//$log->lwrite(__FILE__, sprintf("date val: %s      date displ: %s", $tMonth['dateValue'], $tMonth['dateDisplay']));
+	}
+	return $monthArray;
+	//return $result;
+}
+
+
+
+function getFinancialsMultMonths($beginMonth, $endMonth, $aveReportSize) {
+	// 
+	// This function will return an multi level array ($masterMonthData) with the following structure
+	//	$masterMonthData[$date] = $moData
+	//  Therefore, you can get any one month info (ie: 
+	//	$masterMonthData['201103']['5015']['Amount_mo_disp']  would give 
+	//               the month amount for acct 5015(asset Mgr) for Mar 2011
+	//			or
+	//      $masterMonthData['201103']['5015']['Amount_mo_real']  would give actual numbers for numerical calcs
+	//
+	//	$masterMonthData['201103']['5015']['Category']   would give
+	//		the category that this monthly line item belongs to.
+	//                      or
+	//      $masterMonthData['6moAve'][$acctNum]   structure will provide ave numbers for each acctNum.
+	// Most likely usage would be to get a list/array from db that is the acct #'s from 
+	//   the line item table and have
+	//   that sorted in order you want monthly data displayed.  Then go thru that list 
+	//   using each acct num to reference the array from this function.
+	//
+	//   aveReportSize is expected to be a simple array normally looking like;
+	//        (3, 6, 12)     or    (0=>3, 1=>6, 2=>12)      for 3,6,12 month averages
+
+        date_default_timezone_set('America/Denver');
+
+        // Logging class initialization 
+        $log = new Logging();
+        // set path and name of log file (optional) 
+        $log->lfile('/home/rickchurch11/logs/rdc.log');
+
+        $log->lwrite(__FILE__, sprintf("Entering getFinancialsMultMonths(%s, %s)", $beginMonth,$endMonth));
+
+	$monthArray = convertDateRangeToArray($beginMonth, $endMonth);
+	foreach ($monthArray AS $item) {
+		$month = $item['dateValue'];
+		$masterMonthData[$month] = getFinancials($month);
+		
+	}
+	//  Next we add monthly average sub array to $masterMonthData so that it is accessable as such;
+	//        $masterMonthData['6moAve'][$acctNum]  returns the (display) average number  (6moAve could also be 3moAve, ect)
+	$monthArraySize = count($monthArray);
+	$log->lwrite(__FILE__, sprintf("Number of months to retrieve: %d", $monthArraySize));
+
+	$dbh = new pders_pdo();
+	$query = "SELECT * FROM LINE_ITEMS";
+        //$params = array($lineItem);
+        $result = $dbh->Query($query);
+
+	//  $aveReportSize will define what averages we calc and display
+        //$aveReportSize=array('one'=>3, 'two'=>6, 'three'=>12);    This is passed into the function
+	$AverageReportSize = array();
+	//      $masterMonthData['201103']['5015']['Amount_mo']  
+
+	foreach ($aveReportSize as $monAve){
+		$log->lwrite(__FILE__, sprintf("Number of months to average out: %s", $monAve));
+		$log->lwrite(__FILE__, sprintf("first month to get for %d mo average: %s", $monAve, $monthArray[$monthArraySize-$monAve]['dateValue']));
+		//  skip the calcs and saving data if total months to be displayed are less than average report (ie:3,6,12)
+                if ( $monAve <= $monthArraySize ) {
+			foreach ($result as $lineItem) {
+				$li_id = $lineItem['LI_Id'];
+				$acctNum = $lineItem['LI_AcctNumber'];
+				$cntr2 = 0;
+				$sixMoAveTot = 0;
+			        for ( $moCntr = $monthArraySize - $monAve; $moCntr < $monthArraySize; $moCntr++ ) {
+					$month = $monthArray[$moCntr]['dateValue'];
+					$moAmt = $masterMonthData[$month][$acctNum]['Amount_mo_real'];
+					//$log->lwrite(__FILE__, sprintf("Month: %s     acctNum: %s       Tot accumulated: %s", $month, $acctNum, $sixMoAveTot));
+					//$log->lwrite(__FILE__, sprintf("Monthly amt to add into ave tot: %s", $moAmt));
+					$sixMoAveTot = $sixMoAveTot + $moAmt;
+					if ($cntr2 > 50 ) {
+						$log->lwrite(__FILE__, sprintf("ERROR - Loop exeeded 50 iterations for acct num: %s", $acctNum));
+						break;
+					}
+				}
+				//$log->lwrite(__FILE__, sprintf("Total %d mo amt for %s: %d", $monAve, $acctNum, $sixMoAveTot ));
+				$key = sprintf("%dmoAve", $monAve);
+				//  save averages with the following format;
+				//       $masterMonthData['6moAve'][$acctNum]  returns the display number  (6moAve could also be 3moAve, ect)
+				$masterMonthData[$key][$acctNum] = addDecimalComma($sixMoAveTot / $monAve);
+			}
+			$AverageReportSize[] = $monAve;
+		} else {
+			$log->lwrite(__FILE__, sprintf("Total months displayed %d is less than %d months needed to calc %d ave", $monthArraySize, $monAve, $monAve));
+			//  Need to also remove the array item from $aveReportSize array
+		}
+	}
+	
+	$masterDataAndAveData[0] = $masterMonthData;
+	$masterDataAndAveData[1] = $AverageReportSize;
+
+	return $masterDataAndAveData;
+}
+
+
+
+function getFinancials($month) {
+	// This function will return an multi level array ($moData) with the following structure
+	//  $moData[acct num] = ('LineItem', 
+	//                       'Amount_mo_disp'     monthly amt with commas & decimal pt for display
+	//			 'Amount_ytd_disp'   ytd amt with commas & decimal pt for display
+        //                       'Amount_mo_real'    monthly amt - numerical format for calc manipulation
+        //                       'Amount_ytd_real'    ytd amt - numerical format for calc manipulation
+	//			 'FullName',
+	//			 'Category',
+	//			 'Type')
+
+        date_default_timezone_set('America/Denver');
+
+        // Logging class initialization 
+        $log = new Logging();
+        // set path and name of log file (optional) 
+        $log->lfile('/home/rickchurch11/logs/rdc.log');
+
+        $log->lwrite(__FILE__, sprintf("Entering getFinancials(%s)", $month));
+
+	$dbh = new pders_pdo();
+	$query = "SELECT * FROM ENTRIES WHERE EN_Date = ?";
+	$params = array($month);
+	$result = $dbh->Query($query, $params);
+	$log->lwrite(__FILE__, sprintf("Records found for %s: %d", $month, count($result)));
+	$moData = array();
+	foreach ($result AS $row) {
+		$lineItem = $row['EN_LineItem'];
+		$amount_mo = addDecimalComma($row['EN_Amount_mo']);
+		$amount_ytd = addDecimalComma($row['EN_Amount_ytd']);
+		$query2 = "SELECT * FROM LINE_ITEMS WHERE LI_Id  = ?";
+		$params2 = array($lineItem);
+		$result2 = $dbh->Query($query2, $params2);
+		if ( count($result2) > 1 ) {
+			$msg = sprintf("Error: Unexpected number of results.  Count: %d", count($result2));
+			$log->lwrite(__FILE__, $msg);
+			return;
+		}
+		foreach ( $result2 AS $liRow ) {
+			$acctNumber = $liRow['LI_AcctNumber'];
+			$fullName = $liRow['LI_FullName'];
+			$category = $liRow['LI_Category'];
+			$type = $liRow['LI_Type'];
+		}
+
+		$msg = sprintf("%s    %s     %s    %s    %s    %s    %s", $acctNumber, $lineItem,
+		   $amount_mo, $amount_ytd,$fullName,$category,$type);
+		//$log->lwrite(__FILE__, $msg);
+
+		$moData[$acctNumber] = array('LineItem'=>$lineItem, 'Amount_mo_disp'=>$amount_mo, 'Amount_ytd_disp'=>$amount_ytd,
+		    'Amount_mo_real'=>$row['EN_Amount_mo'], 'Amount_ytd_real'=>$row['EN_Amount_ytd'],
+		    'FullName'=>$fullName, 'Category'=>$category, 'Type'=>$type);
+	}
+	$moDataCnt = count($moData);
+	//$msg = sprintf("Array count for moData: %d", $moDataCnt);
+	$log->lwrite(__FILE__, sprintf("Array count for moData: %d", $moDataCnt));
+	return $moData;
+	// end getFinancials()
+}
+
+
+
+function getList_reportDates() {
+	// get unique dates from DB reflecting the reports we have (by year & month)
+	// Will return an array of dates that look like;
+	//     "DateDisplay"=> "2011-Mar", "DateValue"=>"201103"
+
+	$dates = array("01"=>"Jan", "02"=>"Feb", "03"=>"Mar", "04"=>"Apr", "05"=>"May", "06"=>"Jun", "07"=>"Jul", "08"=>"Aug", "09"=>"Sept", "10"=>"Oct", "11"=>"Nov", "12"=>"Dec");
+
+        date_default_timezone_set('America/Denver');
+
+        // Logging class initialization 
+        $log = new Logging();
+        // set path and name of log file (optional) 
+        $log->lfile('/home/rickchurch11/logs/rdc.log');
+
+	$log->lwrite(__FILE__, "Entering getList_reportDates()");
+
+        $db = new pders_pdo();
+
+        $query = "select distinct EN_Date from ENTRIES ORDER BY EN_Date";
+        $result = $db->Query($query);
+        $disDates = array();
+        try {
+                //echo sprintf("Num of Resutls: %d<br>", count($result));
+                $log->lwrite(__FILE__, sprintf("Num of Resutls: %d<br>", count($result)));
+                foreach ($result AS $row) {
+                        $year = substr($row[0], 0, 4);
+                        $mo = substr($row[0], 4, 2);
+                        $monMod = $dates[$mo];
+                        //$disDates[] = $row[0];
+                        $disDates[] = array("DateDisplay"=>sprintf("%s-%s", $year, $monMod), "DateValue"=>$row[0]);
+                        //$log->lwrite(__FILE__, sprintf("Year mo: %s", sprintf("%s-%s", $year, $monMod)));
+                }
+        } catch (Exception $e) {
+                $log->lwrite(__FILE__, sprintf("DB ERROR: %s", $e->getMessage()));
+                $log->lwrite(__FILE__, sprintf("Num of Resutls: %d", count($result)));
+        }
+	return $disDates;
+}
+
+
+function monthToLoadIsValid($monthToLoad) {
+	$year = substr($monthToLoad, 0, 4);
+	$mo = substr($monthToLoad, 4, 2);
+	if ($year > 2000 && $year < 2020) {
+		if ($mo > 0 && $mo < 13) return True;
+	}
+	return False;
+}
+
+
+function LoadMonthly($reportDate) {
+	//  This function will parse the monthly report text file such that
+	//     it will insert each line item (that is appropriate) into DB.
+	//  To create the financial monthly text file open the Preston pdf
+	//    and begin selecting data with the first line item - acct 4000
+	//    and continue hightlighting on thru to last line item in 
+	//    Other accts.  That will highlite most all line items so that
+	//    you can copy and then paste into Wordpad doc.  Then also copy
+	//    the line for Total Income and paste that below what was copied
+	//    in prior step. Save the file with the name as YYYYMM.   This 
+	//    function should now be able to parse the file and insert the 
+	//    data in to the DB.
+
+
+
+        require_once "include/logger.inc";
+
+        // Logging class initialization 
+        $log = new Logging();
+        // set path and name of log file (optional) 
+        $log->lfile('/home/rickchurch11/logs/rdc.log');
+        // write message to the log file 
+        $log->lwrite(__FILE__, 'Entering LoadMonthly');
+
+	$log->lwrite(__FILE__, sprintf("Month to load: %s", $reportDate));
+
+	if (! monthToLoadIsValid($reportDate)) return;
+	//$reportDate = "201103";
+	$filePath = sprintf("/home/rickchurch11/PrestonFiles/CF%s.txt", $reportDate);
+	//$file=fopen("/home/rickchurch11/CF201103.txt","r");
+	$file=fopen($filePath, "r");
+	$cntr = 0;
+	$specCntr = 0;
+	$specCntr2 = 0;
+	$totOprInc_ytd = 0;
+	while(!feof($file)) {
+		$cntr += 1;
+		if ($cntr > 200){
+			$log->lwrite(__FILE__, "ERROR !!     hit the max counter of 200 - Problem ??");
+			 break;
+		}
+		$line = fgets($file). "<br />";
+		$line = trim($line, "<br />");
+		//echo"<br />LINE: ".$line."<br />";
+		$log->lwrite(__FILE__, "================================================");
+
+		// Lets first parse out these lines;
+		//   Beginning cash balance - needs extra work to get
+		//   Ending cash balance
+		//   Total Operating Income - needs extra work to get
+		//   Total Operating Expenditure
+                $pos = strpos(strtolower($line), "total operating expenditure");
+                if ($pos === false) {
+                        // do nothing
+                } else {
+                        // I want the 2nd line after this line which will contain
+                        //    the Beginning cash balance.  that number ends up as 
+                        //    a single item on the line.
+                        $specCntr = $cntr + 2;
+			$parts = explode("$", $line);
+			$totOprExp_mo = StrToFloat($parts[1]);
+			$totOprExp_ytd = StrToFloat($parts[2]);
+			$log->lwrite(__FILE__, "=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=");
+                        $log->lwrite(__FILE__, sprintf("Total Operating Expenditure (mo): %s",$totOprExp_mo));
+			$log->lwrite(__FILE__, sprintf("Total Operating Expenditure (ytd): %s",$totOprExp_ytd));
+                        $log->lwrite(__FILE__, "=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=");
+			saveToDB($reportDate, "999995", $totOprExp_mo, $totOprExp_ytd);
+			continue;
+                }
+                if ($specCntr != 0 && $cntr == $specCntr) {
+			$begCashBal = StrToFloat($line);
+                        $log->lwrite(__FILE__, "=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=");
+			$log->lwrite(__FILE__, sprintf("line: [%s]", $line));
+                        $log->lwrite(__FILE__, sprintf("Beginning cash balance: %s", $begCashBal));
+			$log->lwrite(__FILE__, "=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=");
+			if ( $endCashBal != 0 && $begCashBal != 0 ) {
+				$cashBalDiff = $endCashBal - $begCashBal;
+				$log->lwrite(__FILE__, sprintf("Cash balance difference: %s", $cashBalDiff));
+				saveToDB($reportDate, "999990", $cashBalDiff);
+			} else {
+				$log->lwrite(__FILE__, "Don't have both begin & end cash bal, so not saving cash bal diff");
+			}
+			saveToDB($reportDate, "999998", $begCashBal);
+			continue;
+                }
+		$endbal = "ending cash balance";
+		$pos = strpos(strtolower($line), $endbal);
+		if ($pos === false) {
+                        // do nothing
+                } else {
+			$parts = explode("$", $line);
+			$endCashBal = StrToFloat($parts[1]);
+			$log->lwrite(__FILE__, "=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=");
+                        $log->lwrite(__FILE__, sprintf("Ending Cash Balance: %s", $endCashBal));
+			$log->lwrite(__FILE__, "=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=");
+                        if ( $endCashBal != 0 && $begCashBal != 0 ) {
+                                $cashBalDiff = $endCashBal - $begCashBal;
+                                $log->lwrite(__FILE__, sprintf("Cash balance difference: %s", $cashBalDiff));
+                                saveToDB($reportDate, "999990", $cashBalDiff);
+                        } else {
+                                $log->lwrite(__FILE__, "Don't have both begin & end cash bal, so not saving cash bal diff");
+                        }
+			saveToDB($reportDate, "999999", $endCashBal);
+			continue;
+		}
+		$pos = strpos(strtolower($line), "total operating income");
+		if ($pos === false) {
+                        // do nothing
+                } else {
+                        // I want the 2nd line after this line which will contain
+                        //    total operating income.  that number ends up as 
+                        //    a single item on the line.
+                        $specCntr2 = $cntr + 2;
+			// get the YTD number and save till we have montly amt
+			$dollarParts = explode("$", $line);
+			if (count($dollarParts) == 2) $totOprInc_ytd = $dollarParts[1];
+		}
+		if ($specCntr2 != 0 && $cntr == $specCntr2) {
+			$totOpInc_mo = StrToFloat($line);
+			
+			$totOprInc_ytd = StrToFloat($totOprInc_ytd);
+                        $log->lwrite(__FILE__, "=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=");
+			$log->lwrite(__FILE__, sprintf("line: [%s]", $line));
+                        $log->lwrite(__FILE__, sprintf("Total Operating Income (mo): %s", $totOpInc_mo));
+			$log->lwrite(__FILE__, sprintf("Total Operating Income (ytd): %s", $totOprInc_ytd));
+                        $log->lwrite(__FILE__, "=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=");
+			saveToDB($reportDate, "999997", $totOpInc_mo, $totOprInc_ytd);
+                        continue;
+                }
+
+		//
+		// split/explode line on single space, get acct num as the first part
+		//     and then re-combine the remaining parts into a modified 'line' string object.
+
+                $parts = explode(" ", $line);
+		$arrayCnt = count($parts);
+		$acctNum = $parts[0];
+		$line_m = "";
+		$partsCntr = 0;
+		while (list($key, $val) = each($parts)) {
+			//echo"explode     key: ".$key."    val: ".$val."<br>";
+			if ($partsCntr > 0) {
+				$line_m = sprintf("%s %s", $line_m, $val);
+			}
+			$partsCntr += 1;
+	
+		}
+		$parts2 = explode("$", $line_m);
+
+		if (count($parts2) > 2) {
+			$log->lwrite(__FILE__, sprintf("LINE: %s", $line));
+			$log->lwrite(__FILE__, sprintf("acct num: %s", $acctNum));
+			$log->lwrite(__FILE__, sprintf("Item Name: %s", $parts2[0]));
+			// Check monthly and YTD for negative values
+			$moAmt = StrToFloat($parts2[1]);
+			$ytdAmt = StrToFloat($parts2[2]);
+			$log->lwrite(__FILE__, sprintf("Month: %s", $moAmt));
+			$log->lwrite(__FILE__, sprintf("YTD: %s", $ytdAmt));
+			// before I insert do the following;
+			//   verify that the acct num exists in db
+			saveToDB($reportDate, $acctNum, $moAmt, $ytdAmt);
+			//exit("quitting");
+		}
+	}
+	fclose($file);
+	//  end LoadMonthly()
+}
+
+function saveToDB($reportDate, $acctNum, $moAmt, $ytdAmt=NULL) {
+	// This function is called by LoadMonthly() to save monthly
+	//    financial report data to DB.  It will first verify that
+	//    the line item data is the type wanted (ie: we don't want
+	//    Building or Land or Equipment numbers) and will also 
+	//    verify that the data item is not already in DB.  It 
+	//    checks that by looking at the Line Item id and current
+	//    month and if that combination exists, will not insert.
+
+        require_once "include/logger.inc";
+
+        // Logging class initialization 
+        $log = new Logging();
+        // set path and name of log file (optional) 
+        $log->lfile('/home/rickchurch11/logs/rdc.log');
+        // write message to the log file 
+        $log->lwrite(__FILE__, 'Entering saveToDB');
+
+	// 
+	// GET EXISTING MAX ID FROM ENTRIES TABLE
+	//
+	$dbh = new pders_pdo();
+	$query = "select max(EN_EntryId) FROM ENTRIES";
+        $result = $dbh->Query($query);
+	$whatisit = gettype($result);
+	//echo "db result type: ".$whatisit."<br>";
+	if ($whatisit == "object" || $whatisit == "array") {
+        	// We have a normal result set returned
+                $parseResult = True;
+	} else {
+        	// Had an error executing the query
+                $parseResult = False;
+        }
+	if (!$parseResult) {
+        	$log->lwrite(__FILE__, sprintf("Error getting max(id): %s", $result));
+		//exit("done");
+		return;
+	}
+	foreach ($result AS $row) {
+		$id = $row[0];
+		$nextId = $id +1;
+		$log->lwrite(__FILE__, sprintf("max id: %s", $id));
+		$log->lwrite(__FILE__, sprintf("next Id: %s", $nextId));
+	}
+
+	//
+	// get the line item id from LINE_ITEMS table	
+	//
+	$query = sprintf("select LI_Id FROM LINE_ITEMS WHERE LI_AcctNumber = '%s'", $acctNum);
+        $result = $dbh->Query($query);
+        $whatisit = gettype($result);
+        //echo "db result type: ".$whatisit."<br>";
+        if ($whatisit == "object" || $whatisit == "array") {
+                // We have a normal result set returned
+                $parseResult = True;
+        } else {
+                // Had an error executing the query
+                        select>
+                $parseResult = False;
+        }
+        if (!$parseResult) {
+                $log->lwrite(__FILE__, sprintf("Error getting max(id): %s", $result));
+                //exit("done");
+		return;
+	}
+	$log->lwrite(__FILE__, sprintf("count records (qry for line Id): %d", count($result)));
+	if (count($result) == 0) {
+		$log->lwrite(__FILE__, "Don't want this item - aborting the insert");
+		return;
+	}
+        foreach ($result AS $row) {
+                $LI_Id = $row['LI_Id'];
+		$log->lwrite(__FILE__, sprintf("LI_Id: %s", $LI_Id));
+	}
+
+	//
+	// verify we are not putting a duplicate entery in the db
+	//
+	//$query = "SELECT COUNT(*) FROM ENTRIES WHERE EN_Date = ? AND EN_LineItem = ?";
+	//$params = array($reportDate, $LI_Id);
+	$query = sprintf("SELECT COUNT(*) FROM ENTRIES WHERE EN_Date = %s AND EN_LineItem = %s", $reportDate, $LI_Id);
+        //$result = $dbh->Query($query, $params);
+	$result = $dbh->Query($query);
+        $whatisit = gettype($result);
+        //echo "db result type: ".$whatisit."<br>";
+        if ($whatisit == "object" || $whatisit == "array") {
+                // We have a normal result set returned
+                $parseResult = True;
+        } else {
+                // Had an error executing the query
+                $parseResult = False;
+        }
+        if (!$parseResult) {
+                $log->lwrite(__FILE__, sprintf("Error getting max(id): %s", $result));
+                //exit("done");
+		return;
+        }
+        foreach ($result AS $row) {
+                $existingCnt = $row[0];
+                $log->lwrite(__FILE__, sprintf("existingCnt: %s", $existingCnt));
+        }
+	if ($existingCnt > 0) {
+		$log->lwrite(__FILE__, "Already inserted this into db - aborting the insert");
+		return;
+	}
+	//exit("stop for now again.");
+
+	//
+	//  INSERT DATA INTO DATABASE
+	//
+	$log->lwrite(__FILE__, "Inserting into DB");
+	$table = "ENTRIES";
+	$data = array('EN_EntryId'=>$nextId, 'EN_Date'=>$reportDate, 'EN_LineItem'=>$LI_Id, 'EN_Amount_mo'=>$moAmt, 'EN_Amount_ytd'=>$ytdAmt);
+	$dbh->InsertRow($table, $data);
+	
+	// end saveToDB()
+}
+
+function StrToFloat($oldnum) {
+
+	// this assumes that the sender verified we have all numeric values
+	//    except for "." or "," or ")"  - ie:  1,234.56 or 1,234.56)
+	// This function takes the string number with comma and dec point and converts to Float
+	// This function also checks to see if we have a negative number as denoted by the 
+	//      last chr being ")".
+
+	// check for $ in value passed in
+	/*
+	$pos = strpos(strtolower($oldnum), "$");
+	if ($pos === false) {
+		// do nothing
+	} else {
+		$dllrParts = explode("$", $oldnum);
+		$oldnum = $dllrParts[1];
+	}
+	*/
+	$dllrParts = explode("$", $oldnum);
+	if (count($dllrParts) > 1) $oldnum = $dllrParts[1];
+
+	$negNum = False;
+	$parenParts = explode(")", $oldnum);
+	if (count($parenParts) > 1) $negNum = True;
+	$oldnum = $parenParts[0];
+
+	$nuVal = "";
+	$numparts = explode(",", $oldnum);
+	while (list($key, $val) = each($numparts)){
+		$nuVal = sprintf("%s%s", $nuVal, $val);
+	}
+	$nuVal = (float)$nuVal;
+	if ($negNum) $nuVal = -$nuVal;
+	if ($negNum) {
+		//echo "<br>=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=<br>";
+		//echo "!!!  Negative Amount !!  ".$nuVal."<br>";
+		//echo "=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=-~=<br><br>";
+	}
+
+	return $nuVal;
+	// end StrToFloat()
+}
+ 
+
+
+function LoadFile()
+{
+  // This function does the inital load of data into
+  //   the LINE_ITEMS table which consists of acct numbers,
+  //   acct names, category, type, ect.  This should only 
+  //   need to be done once for each management company.
+
+  $masterData = array(0);
+  $file=fopen("/home/rickchurch11/DB_Schema3","r");
+  $masterData = array();
+  $data = array();
+  while(!feof($file))
+  {
+    //echo "------------------------------------<br />";
+    //echo fgets($file). "<br />";
+    $line = fgets($file). "<br />";
+    //echo $line;
+    $token = strtok($line, "$");
+    $cntr = 0;
+    while ($token != false)
+    {
+      // tokens are how you parse/split the line read.  I have '$' that I want
+      //    to split the line on.
+      $token = trim($token); 
+      if ($cntr == 3)
+      {
+        $token = trim($token, "<br />");
+        if ($token == "")
+        {
+          $token = "Maintenance & Repairs";
+        }
+        else
+        {
+          $token = trim($token);
+        }
+      
+      }
+      if ($cntr == 1)
+      {
+        for ($i=0; $i < strlen($dummy); $i++)
+        {
+          //echo $i . "     [" . $dummy[$i] . "]";
+        }
+    
+      }
+      if ($cntr == 0)
+      {
+        $data['LI_AcctNumber'] = $token;
+      }
+      if ($cntr == 1)
+      {
+        $data['LI_FullName'] = $token;
+      }
+      if ($cntr == 2)
+      {
+        $data['LI_AcctNickName'] = $token;
+      }
+      if ($cntr == 3)
+      {
+        $data['LI_Category'] = $token;
+      }
+
+      //  this was printing ok ::: echo "[$token]<br />";
+      //$masterData = $data;    
+      $token = strtok("$");
+      $cntr += 1;
+    }
+    $firstBadRecord = trim($data['LI_AcctNumber'], "<br />");
+    //echo " acct# [". $firstBadRecord . "]<br />";
+    if ($firstBadRecord != "")
+    {
+      $query = "select max(LI_Id) from LINE_ITEMS";
+      $db = new pders_pdo();
+      $result = $db->Query($query);
+      foreach ($result AS $row) {
+        $maxid = $row[0];
+        //echo "maxid: ".$row[0]."<br>";
+      }
+      $maxid += 1;
+      //echo "NextId: ".$maxid."<br>";
+      $data['LI_Id']=$maxid;
+      echo "printing one entry<br>";
+      $query = "select LI_AcctNumber from LINE_ITEMS"; 
+      $result = $db->Query($query);
+      $skip = 0;
+      foreach ($result AS $row) {
+        $acctnum = $row['LI_AcctNumber'];
+        if ($acctnum == $data['LI_AcctNumber']) {
+          $skip = 1;
+          break;
+        }
+      }
+      echo "skip: ".$skip."<br>";
+      if ($skip == 0) {
+        $table = 'LINE_ITEMS';
+        $result = $db->InsertRow($table, $data);
+        echo "DB Insert Successfull !!<br>";
+      }
+
+      PrintData($data);
+      array_push($masterData, $data);
+    }
+  }
+  fclose($file);
+  echo "+++++++++++++++++++++++++++++++++++++++<br />";
+  echo "Parsing masterData object<br />";
+  //print_r($masterData);
+  ////PrintData2($masterData);
+
+  // end LoadFile()
+}
+
+/*
+//LoadFile();
+//LoadMonthly();
+
+exit("done");
+
+
+$data['one'] = 1;
+$data['two'] = 2;
+$data['three'] = 3;
+$data['four'] = 4;
+
+//PrintData($data);
+
+*/
+
+function PrintData($data)
+{
+  while (list($key, $val) = each($data))
+  {
+    echo "$key => $val<br />";
+    //echo "key: $key       val: $val<br />";
+  }
+}
+
+function PrintData2($data)
+{
+  // parses what I had as a list of dict objects or 
+  //   2 level array
+  while (list($key, $val) = each($data))
+  {
+    echo "-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=<br />";
+    while (list($key2, $val2) = each($val))
+    {
+      echo "$key2 => $val2<br />";
+      //echo "key: $key       val: $val<br />";
+    }
+  }
+}
+
+?>
+

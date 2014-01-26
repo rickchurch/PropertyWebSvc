@@ -1,0 +1,10 @@
+The pictures that are saved to the LegacyPics folder have the following naming convention;
+
+../images/LegacyPics/<width in pixals>_<height in pixals>__fileName.jpg  (or could be a different extension)
+
+example;     images/LegacyPics/430_573__Vacant_227_LR.jpg
+
+the reason for this is because some pics may be more tall than wide (the case with the pics first copied here) 
+   and so this naming convention allows
+   the code to adjust the width and height accordingly.  The more common pic format is probably the landscape
+   view where the width is more than the height.

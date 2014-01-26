@@ -1,0 +1,54 @@
+<?php
+
+
+
+class pders_db {
+        private $dbuser = 'rickchurch11';
+        private $dbpwd = 'noelcat01';
+        private $dbname = 'rickchurch11';
+
+        //print_r "in pders_db class<br>";
+        
+        function Query($qry)
+        {
+                //print_r "db user is " . $dbuser;
+                $db = new mysqli('localhost', $this->dbuser, $this->dbpwd, $this->dbname);
+                if ($db->errno) {
+			return "Database ERROR: ". $db->error;
+		}
+                $result = $db->query($qry, MYSQLI_STORE_RESULT);
+                $db->close();
+                return $result;       
+        }        
+}
+
+
+class pders_pdo {
+        private $dbuser = 'rickchurch11';
+        private $dbpwd = 'noelcat01';
+        private $dbname = 'rickchurch11';
+        private $hostname = 'localhost';
+
+	public function Query($qry) {
+	        try {
+        	        $dbh = new PDO('mysql:host='.$this->hostname.';dbname='.$this->dbname, $this->dbuser, $this->dbpwd);
+	        } catch (PDOException $exception) {
+        	        return "pdorc error ".$exception->getMessage();
+	        }
+        	$result = $dbh->query($qry);
+		$dbh = NULL;
+		return $result;
+	}
+
+	public function InsertRow($table, $data) {
+		foreach ($data AS $item) {
+			$log->lwrite("item key");
+		}
+	}
+}
+
+
+
+
+
+?>

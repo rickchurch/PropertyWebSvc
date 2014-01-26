@@ -1,0 +1,27 @@
+<HTML>
+<HEAD>
+  <TITLE></TITLE>
+</HEAD>
+
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#800080" ALINK="#FF0000">
+
+<center>
+<font face="arial">
+Coming Soon...
+<p>
+Another website hosted by <a href="http://www.phpwebhosting.com/">phpwebhosting.com</a>
+
+<p>
+<b>Did you upload your files but are still seeing this message?</b>
+<p>
+If yes, make sure you uploaded your files to the "www" directory. All web files
+must be in this directory. Everything above it is private storage that is not
+accessible from the web.
+<p>
+If you still can not see your site, delete the file "index.html" (the name of the file
+you are viewing). If you named your index file index.htm it is not being shown because index.html is
+searched for before index.htm, default.htm, index.php, index.phtml, etc.
+<p>
+</BODY>
+</HTML>
+

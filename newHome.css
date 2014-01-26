@@ -1,0 +1,88 @@
+#container
+{
+width:500px;
+}
+#header
+{
+background-color:#FFA500;
+}
+#footer
+{
+background-color:#FFA500;
+clear:both;
+text-align:center;
+}
+#col_1
+{
+background-color:#FFD700;
+height:200px;
+width:200px;
+float:left;
+}
+#col_2
+{
+background-color:#EEEEEE;
+height:200px;
+width:300px;
+float:left;
+}
+
+
+/*  p.one used on following web pages - home,   */
+p.one
+{
+padding-left:50px;
+border-style:solid;
+border-width:thin;
+margin-right:500px;
+margin-left:100px;
+background-color:ivory;
+}
+p.home
+{
+padding-left:25px;
+border-left-style:solid;
+border-left-width:15px;
+/*border-left-color:SeaGreen; */
+border-left-color:Gold;
+margin-left:75px;
+}
+p.home2
+{
+padding-left:300px;
+}
+
+/* p1 is used for New Engine Request form primarily to line up the input boxes */
+#p1 span
+{ 
+width: 200px; 
+/*display: block;    Doesn't appear to do anything if removed.  width: 200px gives the tab-like look between lable and text box*/
+display: block;
+/*background: #FFFACD; */
+/*float: left;  keeps the text box to the left side against the width parameter edge.*/
+float: left;
+}
+
+/* p2 is used for giving color to input boxes in New Engine Reques form */
+#p2
+{
+background:AntiqueWhite;
+}
+
+#p3
+{
+font-size:16pt;
+float: left;
+}
+#p4
+{
+font-size:12pt;
+float: left;
+}
+
+#errmsg
+{
+color:red
+}
+
+
